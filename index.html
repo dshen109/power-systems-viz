@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Power Systems Visualization</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Interactive Power System Response</h1>
+      <p class="subtitle">
+        Adjust demand loading and observe frequency and generator response changes.
+      </p>
+
+      <section class="panel">
+        <label for="load-slider">System load: <strong><span id="load-value">100</span> MW</strong></label>
+        <input id="load-slider" type="range" min="60" max="180" step="1" value="100" />
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <h2>System Frequency</h2>
+          <p><span id="frequency-value">60.00</span> Hz</p>
+        </article>
+        <article class="card">
+          <h2>Total Generation</h2>
+          <p><span id="generation-value">100.0</span> MW</p>
+        </article>
+      </section>
+
+      <section class="panel">
+        <h2>Generator Outputs</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Generator</th>
+              <th>Base Output (MW)</th>
+              <th>Response Share</th>
+              <th>Current Output (MW)</th>
+            </tr>
+          </thead>
+          <tbody id="generator-table"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -65,7 +65,7 @@ Navigation within each spine is linear (next/back). Spine selector at top level 
 | Explainer animations | Manim (pre-rendered `.mp4`, committed to repo) |
 | Equation rendering | `dash-katex` |
 | Network visualization | NetworkX + Plotly scatter |
-| Hosting | Render.com ($7/mo web service) |
+| Hosting | Render.com (paid web service) |
 | Deploy trigger | Push to `main` → auto-deploy via GitHub |
 
 ### Directory Structure
@@ -160,14 +160,17 @@ class DCPowerFlowParams:
 ```
 User moves slider
   → Dash callback fires (server-side Python)
-  → validate inputs → emit guardrail message if invalid
-  → call solver (SciPy/NumPy)
-  → call figure builder (Plotly)
-  → return (figure, warning_message) to browser
+  → validate inputs
+  → if invalid: return (dcc.Store last-valid figure, warning_message)
+  → if valid: call solver → call figure builder
+             → update dcc.Store with new valid figure
+             → return (new figure, clear warning)
   → browser renders figure + any warning banner
 ```
 
-Latency target: <200 ms per callback. All problems small-scale (≤4 machines, ≤20-bus network). Synchronous callbacks sufficient.
+Each page includes a `dcc.Store(id='last-valid-figure')` component. Callbacks output to both `dcc.Graph` and `dcc.Store`. On guardrail trigger, the callback returns the stored last-valid figure to `dcc.Graph` (no flicker or blank) and shows the warning banner. On valid input, both graph and store are updated.
+
+Latency target: <200 ms per callback for most pages. Exceptions: A3 (phase portrait) targets <5 s for fine grid with 500 ms debounce; A5 (CCT bisection) targets <1 s with 300 ms debounce. All problems small-scale (≤4 machines, ≤20-bus network). Synchronous callbacks sufficient.
 
 ### Concept Registry
 
@@ -245,7 +248,7 @@ Each concept page follows identical structure:
 
 **Rotor clipart:** SVG circle + arrow rendered as Plotly `shapes` and `annotations` within `dcc.Graph`. Rotor angle δ maps to arrow angle via trigonometry. Updated each callback.
 
-**Warning banners:** Red banner below sliders when inputs are physically invalid or solver fails. Suppresses figure update — shows last valid figure with banner overlay.
+**Warning banners:** Red banner below sliders when inputs are physically invalid or solver fails. `dcc.Store` holds last valid figure; callback returns stored figure (no blank/flicker) plus warning text. See data flow in Architecture section.
 
 ---
 
@@ -261,13 +264,15 @@ Each concept page follows identical structure:
 ```
 M δ̈ + D δ̇ = Pm − Pe_max sin(δ)
 
-where  M = 2H / ωs,   ωs = 2π × 60 rad/s (for 60 Hz system)
-       H = inertia constant (MWs/MVA)
-       D = damping coefficient (pu torque / pu speed)
-       Pm = mechanical power input (pu)
-       Pe_max sin(δ) = electrical power output
+where  H     = stored kinetic energy at rated speed per MVA rating
+             = ½Jωs² / S_rated   [units: MJ/MVA = seconds; typical 2–10 s]
+       ωs    = 2π × 60 ≈ 377 rad/s   (synchronous speed, 60 Hz system)
+       M     = 2H / ωs               [per-unit swing mass coefficient, s²/rad on machine MVA base]
+       D     = damping coefficient (pu torque / pu speed deviation)
+       Pm    = mechanical power input (pu on machine MVA base)
+       Pe_max sin(δ) = electrical power output (pu)
 ```
-H is the machine parameter students specify. M is derived. Both are shown on the page. The distinction is explicit: H is energy stored per MVA rating; M is the effective mass in the swing ODE.
+H is the physically meaningful machine parameter — stored kinetic energy per MVA. M = 2H/ωs is the inertia coefficient in the per-unit swing ODE; the factor 1/ωs makes M consistent with the per-unit power convention where angles are in radians and time in seconds. Both H and M are displayed on the page.
 
 **Manim clip purpose:** Derive swing equation from Newton's second law analogy (rotor = spinning mass). Annotate each term. Show that increasing H slows the oscillation; increasing D damps it.
 
@@ -288,8 +293,9 @@ H is the machine parameter students specify. M is derived. Both are shown on the
 - "Increase Pm closer to 1.0. Does the equilibrium shift? Does the system still settle?"
 
 **Numerical guardrails:**
-- |δ| > π rad → stop integration, show: "Rotor lost synchronism (|δ| exceeded π rad). Reduce Pm or increase damping."
-- D < 0 → blocked in slider, not permitted
+- δ > δ_u = π − arcsin(Pm/Pe_max) → primary instability criterion: rotor has crossed the unstable equilibrium. Stop integration, show: "Rotor crossed unstable equilibrium (δ > δ_u). Machine lost synchronism. Reduce Pm or increase D."
+- |δ| > 1.5π rad → absolute plotting stop regardless of equilibrium (e.g. if Pm = 0 and δ_u = π, this catches numerical runaway). Show same message.
+- D < 0 → blocked in slider, not permitted.
 - ODE solver failure → show: "Numerical solver failed. Try shorter simulation time."
 - Pm ≥ 1.0 → show: "Pm exceeds transfer limit. No stable equilibrium exists."
 
@@ -355,7 +361,7 @@ where Δω = ω − ωs (speed deviation from synchronous)
 - H, D, Pm, Pe_max (same as A1)
 - Grid density for IC sweep: coarse/medium/fine (affects number of trajectories shown)
 
-**Solver:** `solve_ivp` with grid of initial conditions over δ ∈ [−π, π], Δω ∈ [−4π, 4π]. Each trajectory integrated until convergence or |δ| > 1.5π. Colored by outcome: blue = converges to stable equilibrium, red = diverges.
+**Solver:** `solve_ivp` with grid of initial conditions over δ ∈ [−π, π], Δω ∈ [−4π, 4π]. Each trajectory integrated until convergence or δ > δ_u (crossing unstable equilibrium → unstable) or |δ| > 1.5π (absolute plotting stop). Colored by outcome: blue = converges to stable equilibrium, red = diverges.
 
 **Plot:** Phase portrait. Multiple trajectories. Stable equilibrium: filled circle. Unstable equilibrium (saddle point): X marker. Color boundary between stable (blue) and unstable (red) regions is approximate — label as "approximate stability boundary (based on trajectory outcomes)." Do not call it a separatrix unless the exact separatrix is computed via manifold methods.
 
@@ -364,8 +370,13 @@ where Δω = ω − ωs (speed deviation from synchronous)
 - "Increase D. What changes near the stable equilibrium?"
 - "Move Pm closer to Pe_max. What happens to the stable region size?"
 
+**Performance and debouncing:**
+- Slider inputs debounced: 500 ms delay before callback fires (`debounce=True`).
+- Grid sizes: coarse = 100 trajectories, medium = 225, fine = 400.
+- Target latency: <2 s (coarse), <5 s (fine).
+- If sweep exceeds 5 s, automatically downgrade to coarse and notify: "Grid reduced for performance."
+
 **Numerical guardrails:**
-- If grid sweep is too slow (fine grid + long sim): warn "Reducing grid for performance." Limit to ≤ 400 trajectories total.
 - Trajectories that fail to integrate: skipped silently.
 - Note shown on plot: "Boundary is approximate — based on trajectory outcomes, not exact separatrix computation."
 
@@ -415,10 +426,10 @@ The clearing angle δc is the control variable on this page. Critical clearing a
 **Numerical guardrails:**
 - δc < δ₀ → blocked (can't clear before fault)
 - δc > δ_max → show: "Clearing angle exceeds maximum deceleration angle. Machine is unstable regardless of clearing."
-- Pe_max_post < Pm/1 (no equilibrium post-fault) → show: "No post-fault equilibrium. System cannot recover."
+- Pm ≥ Pe_max_post (no post-fault equilibrium exists) → show: "No post-fault equilibrium. Reduce Pm or restore more post-fault transfer capacity."
 - Integration failure → show: "Area computation failed. Check that Pe_max_post > Pm."
 
-**Assumptions box:** Single machine, infinite bus. Equal area criterion is exact for lossless SMIB. Does not account for multi-machine interactions. Clearing angle set directly; clearing time computation on next page.
+**Assumptions box:** Single machine, infinite bus. Equal area criterion is exact for the undamped (D = 0), lossless SMIB model. With damping present, the criterion is still a useful approximation but is no longer exact — see page A5 for time-domain comparison. Does not account for multi-machine interactions. Clearing angle set directly; clearing time computation on next page.
 
 ---
 
@@ -446,7 +457,7 @@ until δ reaches δc*.
 - Pe_max_pre, Pe_max_fault, Pe_max_post: same as A4
 - Fault clearing time tc: slider, 0–2 s. Machine labeled STABLE or UNSTABLE based on simulation outcome.
 
-**Solver:** Three-phase `solve_ivp`. Phase transition at t = tc: switch Pe_max from Pe_max_fault to Pe_max_post and restart integration with final state of Phase 2. Stability criterion: |δ| > π rad or dδ/dt > 0 for sustained period after clearing → unstable. CCT reported as bisection result (displayed as informational annotation, not a slider).
+**Solver:** Three-phase `solve_ivp`. Phase transition at t = tc: switch Pe_max from Pe_max_fault to Pe_max_post and restart integration with final state of Phase 2. Stability criterion: δ exceeds the post-fault unstable equilibrium angle δ_u_post = π − arcsin(Pm/Pe_max_post). Absolute plotting stop at |δ| > 1.5π. CCT reported as bisection result (displayed as informational annotation, not a slider). Bisection: max 20 iterations, tolerance 0.01 s; if not converged, display last bracket midpoint with caveat.
 
 **Plot:** δ(t) time series. Fault-on period shaded gray. Vertical line at tc. Annotation: "Clearing time = X s — [STABLE / UNSTABLE]". Rotor clipart beside plot. Secondary annotation: "Estimated CCT ≈ Y s" (from bisection).
 
@@ -456,13 +467,18 @@ until δ reaches δc*.
 - "Set Pe_max_fault = 0 (bolted fault, maximum severity). How short must tc be?"
 - "Compare the critical clearing angle from page A4 to where δ is at the CCT here."
 
+**Performance and debouncing:**
+- Slider inputs debounced: 300 ms delay before callback fires.
+- Total callback target: <1 s (three-phase integration + bisection).
+
 **Numerical guardrails:**
-- |δ| > π → stop, show: "Machine lost synchronism. Rotor angle exceeded π rad."
+- δ > δ_u_post = π − arcsin(Pm/Pe_max_post) → primary instability check. Stop, show: "Machine lost synchronism — rotor angle crossed post-fault unstable equilibrium."
+- |δ| > 1.5π → absolute plotting stop. Show same message.
 - tc = 0 → show: "Fault cleared instantly — system remains at pre-fault equilibrium."
 - ODE solver failure → show: "Integration failed. Try reducing simulation duration."
-- If bisection for CCT fails to converge in 20 iterations → display "CCT estimate unavailable for these parameters."
+- CCT bisection not converged after 20 iterations → display "CCT estimate ≈ Y s (not fully converged)."
 
-**Assumptions box:** Single machine, infinite bus. Classical machine model (constant voltage behind transient reactance). Fault applied at t = 0. Pre-fault assumed steady-state equilibrium.
+**Assumptions box:** Single machine, infinite bus. Classical machine model (constant voltage behind transient reactance). Fault applied at t = 0. Pre-fault assumed steady-state equilibrium. When D > 0, CCT from time-domain integration (this page) will exceed the undamped EAC prediction from page A4 — damping absorbs energy and extends the stable clearing window. Page A4 is a conservative bound when D > 0.
 
 ---
 
@@ -480,10 +496,20 @@ Linearized system at operating point δ₀:
 where  Ks = dPe/dδ|δ₀ = Pe_max cos(δ₀)   (synchronizing torque coefficient)
        M = 2H / ωs
 
-Eigenvalues: λ = −D/(2M) ± j√(Ks/M − (D/(2M))²)
+Let  α  = D / (2M)          [decay rate, rad/s]
+     ωn = √(Ks / M)         [undamped natural frequency, rad/s]
 
-Damping ratio:  ζ = D / (2√(Ks M))
-Natural frequency: ωn = √(Ks / M)   rad/s
+Underdamped  (α < ωn,  i.e. D² < 4·Ks·M):
+  λ = −α ± j√(ωn² − α²)    [complex conjugate pair — oscillatory decay]
+  ζ = α / ωn = D / (2√(Ks·M))
+
+Critically damped  (α = ωn):
+  λ = −α                    [repeated real root — fastest decay, no oscillation]
+
+Overdamped  (α > ωn,  i.e. D² > 4·Ks·M):
+  λ = −α ± √(α² − ωn²)     [two distinct negative real roots — no oscillation]
+
+Typical power system: underdamped, ζ ≈ 0.05–0.2.
 ```
 
 This page uses machine + infinite bus only. No AVR, no governor, no exciter dynamics. Adding AVR would require modeling the exciter state equations, which is a separate topic.
@@ -609,7 +635,7 @@ Known analytic results used as ground truth:
 
 ## Deployment
 
-**Platform:** Render.com web service ($7/mo)
+**Platform:** Render.com web service (paid tier)
 
 - GitHub repo connected; push to `main` triggers deploy
 - Python buildpack; `requirements.txt` pins all dependencies

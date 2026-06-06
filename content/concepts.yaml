@@ -1,0 +1,40 @@
+spines:
+  - id: A
+    name: Stability
+    pages:
+      - id: A1
+        title: Swing Equation
+        route: /stability/swing-equation
+        video: a1_swing_equation.mp4
+        equation_key: swing_eq
+        mvp: 1
+      - id: A2
+        title: SMIB Equilibrium
+        route: /stability/smib-equilibrium
+        video: a2_smib_equilibrium.mp4
+        equation_key: smib_eq
+        mvp: 1
+      - id: A3
+        title: Phase Portrait
+        route: /stability/phase-portrait
+        video: a3_phase_portrait.mp4
+        equation_key: phase_eq
+        mvp: 1
+      - id: A4
+        title: Equal Area Criterion
+        route: /stability/equal-area
+        video: a4_equal_area.mp4
+        equation_key: equal_area_eq
+        mvp: 1
+      - id: A5
+        title: Critical Clearing Time
+        route: /stability/critical-clearing-time
+        video: a5_cct.mp4
+        equation_key: cct_eq
+        mvp: 1
+      - id: A6
+        title: Eigenvalue Damping
+        route: /stability/eigenvalue-damping
+        video: a6_eigenvalue.mp4
+        equation_key: eigenvalue_eq
+        mvp: 1

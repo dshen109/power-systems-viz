@@ -7,6 +7,7 @@ from solvers.swing import (
     find_smib_equilibria,
     solve_swing,
 )
+from solvers.stability import compute_eigenvalues
 
 
 class TestFindSmibEquilibria:
@@ -112,3 +113,77 @@ class TestSolveSwing:
         # warning should be set and arrays should still be returned (truncated)
         if result["warning"]:
             assert "synchronism" in result["warning"].lower() or "unstable" in result["warning"].lower()
+
+
+class TestComputeEigenvalues:
+    def test_returns_expected_keys(self):
+        result = compute_eigenvalues(H=5.0, D=1.0, Pm=0.5, Pe_max=1.0)
+        for key in ("eigenvalues", "sigma", "omega_d", "omega_n", "zeta", "Ks", "warning"):
+            assert key in result
+
+    def test_no_warning_valid_input(self):
+        result = compute_eigenvalues(H=5.0, D=1.0, Pm=0.5, Pe_max=1.0)
+        assert result["warning"] is None
+
+    def test_pm_ge_pe_max_returns_warning(self):
+        result = compute_eigenvalues(H=5.0, D=1.0, Pm=1.05, Pe_max=1.0)
+        assert result["warning"] is not None
+
+    def test_undamped_eigenvalues_pure_imaginary(self):
+        """D = 0 → σ = 0 exactly."""
+        result = compute_eigenvalues(H=5.0, D=0.0, Pm=0.5, Pe_max=1.0)
+        assert result["warning"] is None
+        assert result["sigma"] == pytest.approx(0.0, abs=1e-10)
+        assert result["omega_d"] > 0
+
+    def test_eigenvalues_negative_real_part_when_damped(self):
+        """D > 0 → σ < 0 (stable)."""
+        result = compute_eigenvalues(H=5.0, D=1.0, Pm=0.5, Pe_max=1.0)
+        assert result["sigma"] < 0
+
+    def test_omega_n_matches_analytic(self):
+        """ωn = √(Ks/M)."""
+        H, Pm, Pe_max = 5.0, 0.5, 1.0
+        from solvers.swing import OMEGA_S
+        M = 2 * H / OMEGA_S
+        delta_eq = np.arcsin(Pm / Pe_max)
+        Ks = Pe_max * np.cos(delta_eq)
+        expected_omega_n = np.sqrt(Ks / M)
+
+        result = compute_eigenvalues(H=H, D=0.0, Pm=Pm, Pe_max=Pe_max)
+        assert result["omega_n"] == pytest.approx(expected_omega_n, rel=1e-6)
+
+    def test_damping_ratio_matches_formula(self):
+        """ζ = D / (2√(Ks·M))."""
+        H, D, Pm, Pe_max = 5.0, 1.0, 0.5, 1.0
+        from solvers.swing import OMEGA_S
+        M = 2 * H / OMEGA_S
+        delta_eq = np.arcsin(Pm / Pe_max)
+        Ks = Pe_max * np.cos(delta_eq)
+        expected_zeta = D / (2 * np.sqrt(Ks * M))
+
+        result = compute_eigenvalues(H=H, D=D, Pm=Pm, Pe_max=Pe_max)
+        assert result["zeta"] == pytest.approx(expected_zeta, rel=1e-6)
+
+    def test_eigenvalues_match_numpy_directly(self):
+        """Eigenvalues match what numpy.linalg.eig returns for same A-matrix."""
+        H, D, Pm, Pe_max = 5.0, 1.0, 0.5, 1.0
+        from solvers.swing import OMEGA_S
+        M = 2 * H / OMEGA_S
+        delta_eq = np.arcsin(Pm / Pe_max)
+        Ks = Pe_max * np.cos(delta_eq)
+        A = np.array([[0, 1], [-Ks / M, -D / M]])
+        expected = np.sort_complex(np.linalg.eig(A)[0])
+
+        result = compute_eigenvalues(H=H, D=D, Pm=Pm, Pe_max=Pe_max)
+        actual = np.sort_complex(result["eigenvalues"])
+        np.testing.assert_allclose(actual.real, expected.real, atol=1e-10)
+        np.testing.assert_allclose(actual.imag, expected.imag, atol=1e-10)
+
+    def test_overdamped_eigenvalues_real(self):
+        """Very large D → eigenvalues are both real (overdamped)."""
+        result = compute_eigenvalues(H=5.0, D=50.0, Pm=0.5, Pe_max=1.0)
+        assert result["warning"] is None
+        # Imaginary parts should be near zero
+        for lam in result["eigenvalues"]:
+            assert abs(lam.imag) < 1e-6

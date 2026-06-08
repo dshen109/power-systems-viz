@@ -7,7 +7,7 @@ from solvers.swing import (
     find_smib_equilibria,
     solve_swing,
 )
-from solvers.stability import compute_eigenvalues
+from solvers.stability import compute_eigenvalues, compute_phase_portrait
 
 
 class TestFindSmibEquilibria:
@@ -187,3 +187,43 @@ class TestComputeEigenvalues:
         # Imaginary parts should be near zero
         for lam in result["eigenvalues"]:
             assert abs(lam.imag) < 1e-6
+
+
+class TestComputePhasePortrait:
+    def test_returns_expected_keys(self):
+        result = compute_phase_portrait(H=5.0, D=1.0, Pm=0.5, Pe_max=1.0, density="coarse")
+        for key in ("trajectories", "delta_s", "delta_u", "warning"):
+            assert key in result
+
+    def test_coarse_returns_100_trajectories(self):
+        result = compute_phase_portrait(H=5.0, D=1.0, Pm=0.5, Pe_max=1.0, density="coarse")
+        assert len(result["trajectories"]) == 100
+
+    def test_medium_returns_225_trajectories(self):
+        result = compute_phase_portrait(H=5.0, D=1.0, Pm=0.5, Pe_max=1.0, density="medium")
+        assert len(result["trajectories"]) == 225
+
+    def test_fine_returns_400_trajectories(self):
+        result = compute_phase_portrait(H=5.0, D=1.0, Pm=0.5, Pe_max=1.0, density="fine")
+        assert len(result["trajectories"]) == 400
+
+    def test_each_trajectory_has_arrays(self):
+        result = compute_phase_portrait(H=5.0, D=1.0, Pm=0.5, Pe_max=1.0, density="coarse")
+        for traj in result["trajectories"]:
+            assert "delta" in traj
+            assert "omega" in traj
+            assert "stable" in traj
+            assert len(traj["delta"]) > 0
+
+    def test_some_stable_some_unstable(self):
+        """With D > 0 and Pm < Pe_max, expect a mix of stable and unstable ICs."""
+        result = compute_phase_portrait(H=5.0, D=1.0, Pm=0.5, Pe_max=1.0, density="coarse")
+        stable_count = sum(1 for t in result["trajectories"] if t["stable"])
+        unstable_count = sum(1 for t in result["trajectories"] if not t["stable"])
+        assert stable_count > 0
+        assert unstable_count > 0
+
+    def test_equilibria_returned(self):
+        result = compute_phase_portrait(H=5.0, D=1.0, Pm=0.5, Pe_max=1.0, density="coarse")
+        assert result["delta_s"] == pytest.approx(np.arcsin(0.5), abs=1e-10)
+        assert result["delta_u"] == pytest.approx(np.pi - np.arcsin(0.5), abs=1e-10)

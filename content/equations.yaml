@@ -1,0 +1,41 @@
+swing_eq:
+  latex: "M\\ddot{\\delta} + D\\dot{\\delta} = P_m - P_{e,\\max}\\sin(\\delta), \\quad M = \\frac{2H}{\\omega_s}"
+  gloss: >
+    The swing equation is Newton's second law for the rotor. M (inertia coefficient) resists
+    acceleration; D (damping) opposes speed deviation. The right-hand side is the net
+    torque: mechanical input minus electrical output.
+
+smib_eq:
+  latex: "\\delta_s = \\arcsin\\!\\left(\\frac{P_m}{P_{e,\\max}}\\right), \\quad \\delta_u = \\pi - \\delta_s"
+  gloss: >
+    At equilibrium the rotor neither accelerates nor decelerates. Two solutions exist when
+    Pm < Pe_max: the stable equilibrium δ_s (restoring force acts inward) and the unstable
+    equilibrium δ_u (restoring force acts outward).
+
+phase_eq:
+  latex: "\\dot{\\delta} = \\Delta\\omega, \\quad \\Delta\\dot{\\omega} = \\frac{P_m - P_{e,\\max}\\sin\\delta}{M} - \\frac{D}{M}\\Delta\\omega"
+  gloss: >
+    The swing equation rewritten as a first-order system. Each point (δ, Δω) is a state.
+    A trajectory in this plane is the machine's motion over time. Stable equilibria attract
+    nearby trajectories; unstable equilibria repel them.
+
+equal_area_eq:
+  latex: "A_{\\rm accel} = \\int_{\\delta_0}^{\\delta_c}\\!(P_m - P_f\\sin\\delta)\\,d\\delta \\leq \\int_{\\delta_c}^{\\delta_{\\max}}\\!(P_p\\sin\\delta - P_m)\\,d\\delta = A_{\\rm decel}"
+  gloss: >
+    The equal area criterion: a machine survives a fault if the decelerating energy available
+    after clearing exceeds the accelerating energy absorbed during the fault. This gives the
+    critical clearing angle — the maximum δ at which the breaker can open and still recover.
+
+cct_eq:
+  latex: "\\delta(t_c) = \\delta_c^* \\implies t_c = t_c^* \\text{ (critical clearing time)}"
+  gloss: >
+    The critical clearing time is found by integrating the fault-on swing equation until the
+    rotor angle reaches the critical clearing angle from the equal area criterion. Clearing
+    earlier is safe; clearing later causes loss of synchronism.
+
+eigenvalue_eq:
+  latex: "A = \\begin{bmatrix} 0 & 1 \\\\ -K_s/M & -D/M \\end{bmatrix}, \\quad \\lambda = -\\alpha \\pm j\\omega_d, \\quad \\zeta = \\frac{D}{2\\sqrt{K_s M}}"
+  gloss: >
+    Linearizing around the stable equilibrium gives a 2×2 A-matrix. Its eigenvalues
+    determine small-signal behavior: negative real parts mean stable; imaginary parts mean
+    oscillatory. The damping ratio ζ quantifies how quickly oscillations decay.

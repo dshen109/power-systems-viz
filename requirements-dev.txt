@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest==8.2.2
+selenium
+dash[testing]==2.17.1

@@ -7,7 +7,7 @@ from solvers.swing import (
     find_smib_equilibria,
     solve_swing,
 )
-from solvers.stability import compute_eigenvalues, compute_phase_portrait
+from solvers.stability import compute_eigenvalues, compute_phase_portrait, compute_equal_area, solve_fault_sequence, find_cct
 
 
 class TestFindSmibEquilibria:
@@ -227,3 +227,118 @@ class TestComputePhasePortrait:
         result = compute_phase_portrait(H=5.0, D=1.0, Pm=0.5, Pe_max=1.0, density="coarse")
         assert result["delta_s"] == pytest.approx(np.arcsin(0.5), abs=1e-10)
         assert result["delta_u"] == pytest.approx(np.pi - np.arcsin(0.5), abs=1e-10)
+
+
+class TestComputeEqualArea:
+    def test_returns_expected_keys(self):
+        result = compute_equal_area(
+            Pm=0.5, Pe_max_pre=1.0, Pe_max_fault=0.0,
+            Pe_max_post=1.0, delta_c=np.radians(60),
+        )
+        for key in ("A_accel", "A_decel", "stable", "delta_0", "delta_max", "warning"):
+            assert key in result
+
+    def test_bolted_fault_accel_area_analytic(self):
+        """Pe_max_fault=0 → A_accel = Pm*(delta_c - delta_0) (exact analytic)."""
+        Pm, Pe_max_pre, delta_c_deg = 0.3, 1.0, 60.0
+        delta_c = np.radians(delta_c_deg)
+        result = compute_equal_area(
+            Pm=Pm, Pe_max_pre=Pe_max_pre, Pe_max_fault=0.0,
+            Pe_max_post=Pe_max_pre, delta_c=delta_c,
+        )
+        delta_0 = np.arcsin(Pm / Pe_max_pre)
+        expected_A_accel = Pm * (delta_c - delta_0)
+        assert result["A_accel"] == pytest.approx(expected_A_accel, rel=1e-4)
+
+    def test_small_clearing_angle_stable(self):
+        """Clearing just past pre-fault equilibrium → large decel area → stable."""
+        result = compute_equal_area(
+            Pm=0.5, Pe_max_pre=1.0, Pe_max_fault=0.0,
+            Pe_max_post=1.0, delta_c=np.radians(40),
+        )
+        assert result["stable"] is True
+
+    def test_large_clearing_angle_unstable(self):
+        """Clearing near delta_max → tiny decel area → unstable."""
+        result = compute_equal_area(
+            Pm=0.5, Pe_max_pre=1.0, Pe_max_fault=0.0,
+            Pe_max_post=1.0, delta_c=np.radians(148),
+        )
+        assert result["stable"] is False
+
+    def test_no_post_fault_equilibrium(self):
+        """Pm >= Pe_max_post → warning returned."""
+        result = compute_equal_area(
+            Pm=1.1, Pe_max_pre=1.5, Pe_max_fault=0.0,
+            Pe_max_post=1.0, delta_c=np.radians(60),
+        )
+        assert result["warning"] is not None
+
+    def test_delta_0_is_arcsin(self):
+        result = compute_equal_area(
+            Pm=0.4, Pe_max_pre=1.0, Pe_max_fault=0.0,
+            Pe_max_post=1.0, delta_c=np.radians(50),
+        )
+        assert result["delta_0"] == pytest.approx(np.arcsin(0.4), rel=1e-6)
+
+
+class TestSolveFaultSequence:
+    def _default_kwargs(self, **kw):
+        d = dict(H=5.0, D=0.5, Pm=0.5, Pe_max_pre=1.0,
+                 Pe_max_fault=0.0, Pe_max_post=1.0, t_clear=0.1)
+        d.update(kw)
+        return d
+
+    def test_returns_expected_keys(self):
+        result = solve_fault_sequence(**self._default_kwargs())
+        for key in ("t", "delta", "fault_period", "stable", "delta_u_post", "warning"):
+            assert key in result
+
+    def test_short_clear_time_stable(self):
+        result = solve_fault_sequence(**self._default_kwargs(t_clear=0.05))
+        assert result["stable"] is True
+        assert result["warning"] is None
+
+    def test_long_clear_time_unstable(self):
+        result = solve_fault_sequence(**self._default_kwargs(t_clear=3.0))
+        assert result["stable"] is False
+
+    def test_fault_period_annotated(self):
+        result = solve_fault_sequence(**self._default_kwargs(t_clear=0.1))
+        assert result["fault_period"] == (0.0, 0.1)
+
+    def test_arrays_concatenated(self):
+        """t and delta arrays span full simulation (not just fault phase)."""
+        result = solve_fault_sequence(**self._default_kwargs(t_clear=0.1))
+        assert result["t"][-1] > 0.1  # extends past fault clearing
+
+
+class TestFindCct:
+    def test_returns_expected_keys(self):
+        result = find_cct(H=5.0, D=0.5, Pm=0.5, Pe_max_pre=1.0,
+                          Pe_max_fault=0.0, Pe_max_post=1.0)
+        for key in ("cct", "converged", "warning"):
+            assert key in result
+
+    def test_cct_in_reasonable_range(self):
+        """For a typical SMIB with H=5, bolted fault, CCT should be 0.1–1.5 s."""
+        result = find_cct(H=5.0, D=0.0, Pm=0.5, Pe_max_pre=1.0,
+                          Pe_max_fault=0.0, Pe_max_post=1.0)
+        assert result["converged"] is True
+        assert 0.1 < result["cct"] < 1.5
+
+    def test_cct_decreases_with_higher_pm(self):
+        """Heavier loading → shorter CCT."""
+        r1 = find_cct(H=5.0, D=0.0, Pm=0.3, Pe_max_pre=1.0,
+                      Pe_max_fault=0.0, Pe_max_post=1.0)
+        r2 = find_cct(H=5.0, D=0.0, Pm=0.7, Pe_max_pre=1.0,
+                      Pe_max_fault=0.0, Pe_max_post=1.0)
+        assert r1["cct"] > r2["cct"]
+
+    def test_cct_increases_with_higher_h(self):
+        """More inertia → longer CCT."""
+        r1 = find_cct(H=3.0, D=0.0, Pm=0.5, Pe_max_pre=1.0,
+                      Pe_max_fault=0.0, Pe_max_post=1.0)
+        r2 = find_cct(H=8.0, D=0.0, Pm=0.5, Pe_max_pre=1.0,
+                      Pe_max_fault=0.0, Pe_max_post=1.0)
+        assert r2["cct"] > r1["cct"]
